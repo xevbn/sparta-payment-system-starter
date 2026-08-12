@@ -6,6 +6,7 @@ import com.sparta.paymentsystem.domain.cart.repository.CartItemRepository;
 import com.sparta.paymentsystem.global.error.BusinessException;
 import com.sparta.paymentsystem.global.error.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,6 +16,7 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
+@Slf4j
 public class CartService {
 
     private final CartItemRepository cartItemRepository;
@@ -61,6 +63,16 @@ public class CartService {
 
     public List<CartItem> findCartEntitiesByIds(Long memberId, List<Long> ids) {
         return cartItemRepository.findByIdInAndMember_IdWithProduct(ids, memberId);
+    }
+
+    @Transactional
+    public void clearCartItems(List<Long> orderedItemIds, Long memberId) {
+        int deleted = cartItemRepository.deleteAllByIdInAndMember_Id(orderedItemIds, memberId);
+
+        if (deleted != orderedItemIds.size()) {
+            log.warn("장바구니 삭제 불일치: expected={}, actual={}, memberId={}",
+                    orderedItemIds.size(), deleted, memberId);
+        }
     }
 
     private CartItemResponse toResponse(CartItem item) {
