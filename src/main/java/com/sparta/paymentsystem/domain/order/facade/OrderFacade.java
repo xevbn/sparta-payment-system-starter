@@ -2,7 +2,18 @@ package com.sparta.paymentsystem.domain.order.facade;
 
 import com.sparta.paymentsystem.domain.cart.entity.CartItem;
 import com.sparta.paymentsystem.domain.cart.service.CartService;
+import com.sparta.paymentsystem.domain.member.entity.Member;
+import com.sparta.paymentsystem.domain.member.service.MemberService;
 import com.sparta.paymentsystem.domain.order.dto.CheckoutResponse;
+import com.sparta.paymentsystem.domain.order.dto.OrderCheckoutRequest;
+import com.sparta.paymentsystem.domain.order.dto.OrderCheckoutResponse;
+import com.sparta.paymentsystem.domain.order.dto.OrderResponse;
+import com.sparta.paymentsystem.domain.order.entity.Order;
+import com.sparta.paymentsystem.domain.order.entity.OrderItem;
+import com.sparta.paymentsystem.domain.order.service.OrderService;
+import com.sparta.paymentsystem.domain.payment.entity.Payment;
+import com.sparta.paymentsystem.domain.payment.service.PaymentService;
+import com.sparta.paymentsystem.domain.product.entity.Product;
 import com.sparta.paymentsystem.global.error.BusinessException;
 import com.sparta.paymentsystem.global.error.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -10,7 +21,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -19,6 +32,9 @@ import java.util.List;
 public class OrderFacade {
 
     private final CartService cartService;
+    private final MemberService memberService;
+    private final OrderService orderService;
+    private final PaymentService paymentService;
 
     public CheckoutResponse getCheckout(Long memberId, List<Long> cartItemIds) {
         // 주문서 미리보기 : 재고 차감/주문 생성 없는 읽기 전용
@@ -49,6 +65,69 @@ public class OrderFacade {
                 .sum();
 
         return new CheckoutResponse(items, totalPrice);
+    }
+
+    @Transactional
+    public OrderCheckoutResponse createOrder(long memberId, OrderCheckoutRequest req) {
+        List<Long> cartItemIds = (req != null) ? req.cartItemIds() : List.of();
+
+        Member member = memberService.findById(memberId);
+
+        List<CartItem> cartItems = getValidatedCartItems(memberId, cartItemIds);
+
+        List<OrderItem> orderItems = new ArrayList<>();
+
+        for (CartItem cartItem: cartItems) {
+            Product product = cartItem.getProduct();
+            product.deductStock(cartItem.getQuantity());
+
+            OrderItem orderItem = new OrderItem(
+                    product,
+                    product.getPrice(),
+                    product.getStock()
+            );
+            orderItems.add(orderItem);
+        }
+
+        int totalPrice = orderItems.stream().mapToInt(OrderItem::getSubtotal).sum();
+
+        Order order = orderService.createOrder(member, orderItems, totalPrice);
+
+        Payment payment = paymentService.createPayment(order, order.getTotalPrice());
+
+        List<Long> orderedItemIds = cartItems.stream().map(CartItem::getId).toList();
+        cartService.clearCartItems(orderedItemIds, memberId);
+
+        return new OrderCheckoutResponse(
+                order.getId(),
+                payment.getPortonePaymentId(),
+                order.getTotalPrice(),
+                order.getOrderName(),
+                order.getStatus().name()
+        );
+    }
+
+    public List<OrderResponse> getOrders(Long memberId) {
+        List<Order> orders = orderService.findOrderEntities(memberId);
+        List<Long> orderIds = orders.stream().map(Order::getId).toList();
+        Map<Long, Long> paymentMap = paymentService.findPaymentIdMapByOrderIds(orderIds);
+
+        return orders.stream()
+                .map(order -> orderService.toResponse(order, paymentMap.get(order.getId())))
+                .toList();
+    }
+
+
+    public OrderResponse getOrder(Long memberId, Long orderId) {
+        Order order = orderService.findOrderEntity(orderId);
+        if (order.getMemberId().equals(memberId)) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+        }
+
+        Long paymentId = paymentService.findPaymentIdByOrderId(order.getId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+
+        return orderService.toResponse(order, paymentId);
     }
 
     private List<CartItem> getValidatedCartItems(Long memberId, List<Long> cartItemIds) {
