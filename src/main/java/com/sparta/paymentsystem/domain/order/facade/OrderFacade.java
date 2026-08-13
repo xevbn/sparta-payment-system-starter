@@ -84,7 +84,7 @@ public class OrderFacade {
             OrderItem orderItem = new OrderItem(
                     product,
                     product.getPrice(),
-                    product.getStock()
+                    cartItem.getQuantity()
             );
             orderItems.add(orderItem);
         }

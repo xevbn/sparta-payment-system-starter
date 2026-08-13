@@ -18,4 +18,8 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     //각 주문마다 findIdByOrderId를 돌리면 N번 쿼리가 나가는데, IN 절로 한 번에 가져오기
     @Query("SELECT p.order.id, p.id FROM Payment p WHERE p.order.id IN :orderIds")
     List<Object[]> findIdsByOrderIds(@Param("orderIds") List<Long> orderIds);
+
+    // 주문 단건 상세 조회 : orderId만으로 조회
+    @Query("SELECT p FROM Payment p JOIN FETCH p.order WHERE p.order.id = :orderId")
+    Optional<Payment> findByOrderIdWithOrder(@Param("orderId") Long orderId);
 }
